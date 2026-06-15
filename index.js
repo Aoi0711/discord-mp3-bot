@@ -1,7 +1,7 @@
 // 1行目に環境変数を強制設定（Render上で確実に動かすため）
 process.env.FFMPEG_PATH = require('ffmpeg-static');
 
-const { Client, GatewayIntentBits, ApplicationCommandType, ContextMenuCommandBuilder, AttachmentBuilder } = require('discord.js');
+const { Client, GatewayIntentBits, ApplicationCommandType, ContextMenuCommandBuilder } = require('discord.js');
 const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
@@ -79,14 +79,13 @@ client.on('interactionCreate', async (interaction) => {
                     .save(outputPath);
             });
 
-            // 【フリーズ対策を施した正しい送信方法】
-            // ファイルパスの代わりに、中身をバイナリデータ（Buffer）として読み込み、
-            // ファイル名と一緒に直接送信データに組み込むことでプレイヤー化（自動再生）を確実に防ぎます。
+            // 【超強力・プレイヤー化を100%阻止する設定】
+            // 末尾を「.mp3.bin」という名前に偽装して送信します。
             const fileBuffer = fs.readFileSync(outputPath);
-            const fileName = `${path.parse(attachment.name).name}.mp3`;
+            const fileName = `${path.parse(attachment.name).name}.mp3.bin`;
 
             await interaction.followUp({ 
-                content: '✅ MP3への変換が完了しました！', 
+                content: '✅ MP3への変換が完了しました！ダウンロード後、ファイル名の末尾の「.bin」を消すと通常のMP3として使用できます。', 
                 files: [{
                     attachment: fileBuffer,
                     name: fileName
@@ -95,7 +94,6 @@ client.on('interactionCreate', async (interaction) => {
 
         } catch (error) {
             console.error('全体の処理エラー:', error);
-            // エラーが発生した場合、「考え中」を解除してチャットにエラーを報告する（フリーズ防止）
             await interaction.followUp({ content: `❌ 変換中にエラーが発生して停止しました。\n理由: ${error.message || error}` });
         } finally {
             // ファイルの片付け
