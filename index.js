@@ -1,3 +1,5 @@
+// 一番最初（1行目）にこれを追加します
+process.env.FFMPEG_PATH = require('ffmpeg-static');
 const { Client, GatewayIntentBits, ApplicationCommandType, ContextMenuCommandBuilder, AttachmentBuilder } = require('discord.js');
 const axios = require('axios');
 const fs = require('fs');
