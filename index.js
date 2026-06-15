@@ -1,5 +1,6 @@
-// 一番最初（1行目）にこれを追加します
+// 1行目に環境変数を強制設定（Render上で確実に動かすため）
 process.env.FFMPEG_PATH = require('ffmpeg-static');
+
 const { Client, GatewayIntentBits, ApplicationCommandType, ContextMenuCommandBuilder, AttachmentBuilder } = require('discord.js');
 const axios = require('axios');
 const fs = require('fs');
@@ -14,7 +15,6 @@ const client = new Client({
     ]
 });
 
-// 長押しメニューに表示する名前の定義
 const mp3Command = new ContextMenuCommandBuilder()
     .setName('MP3に変換する') 
     .setType(ApplicationCommandType.Message);
@@ -45,12 +45,15 @@ client.on('interactionCreate', async (interaction) => {
             return interaction.reply({ content: '❌ 添付されているファイルは音声データではありません。', ephemeral: true });
         }
 
+        // 考え中（保留状態）を開始
         await interaction.deferReply();
 
-        const inputPath = path.join(__dirname, attachment.name);
-        const outputPath = path.join(__dirname, `${path.parse(attachment.name).name}.mp3`);
+        // サーバーが停止しないよう一時保存先を /tmp フォルダ（Linuxの安全な場所）に変更
+        const inputPath = path.join('/tmp', attachment.name);
+        const outputPath = path.join('/tmp', `${path.parse(attachment.name).name}.mp3`);
 
         try {
+            // ファイルのダウンロード処理
             const response = await axios({ method: 'GET', url: attachment.url, responseType: 'stream' });
             const writer = fs.createWriteStream(inputPath);
             response.data.pipe(writer);
@@ -60,21 +63,34 @@ client.on('interactionCreate', async (interaction) => {
                 writer.on('error', reject);
             });
 
+            // 音声のMP3変換処理
             await new Promise((resolve, reject) => {
                 ffmpeg(inputPath)
+                    .setFfmpegPath(process.env.FFMPEG_PATH) // 明示的にパスを指定
                     .toFormat('mp3')
-                    .on('end', () => resolve())
-                    .on('error', (err) => reject(err))
+                    .on('end', () => {
+                        console.log('FFmpegの変換が成功しました');
+                        resolve();
+                    })
+                    .on('error', (err) => {
+                        console.error('FFmpeg内部エラー:', err.message);
+                        reject(err);
+                    })
                     .save(outputPath);
             });
 
-            const file = new AttachmentBuilder(outputPath);
+            // 完了後の送信（音楽プレイヤー化を防ぎ、ダウンロードボタンを強制出現させる設定付き）
+            const file = new AttachmentBuilder(outputPath)
+                .setContentType('application/octet-stream'); // プレイヤー化を阻止する設定
+
             await interaction.followUp({ content: '✅ MP3への変換が完了しました！', files: [file] });
 
         } catch (error) {
-            console.error(error);
-            await interaction.followUp({ content: '❌ 変換中にエラーが発生しました。' });
+            console.error('全体の処理エラー:', error);
+            // エラーが発生した場合、「考え中」を解除してチャットにエラーを報告する（フリーズ防止）
+            await interaction.followUp({ content: `❌ 変換中にエラーが発生して停止しました。\n理由: ${error.message || error}` });
         } finally {
+            // ファイルの片付け
             if (fs.existsSync(inputPath)) fs.unlinkSync(inputPath);
             if (fs.existsSync(outputPath)) fs.unlinkSync(outputPath);
         }
