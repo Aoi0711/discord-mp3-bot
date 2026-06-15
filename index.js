@@ -69,11 +69,11 @@ client.on('interactionCreate', async (interaction) => {
             });
 
             const file = new AttachmentBuilder(outputPath);
-            await interaction.followup({ content: '✅ MP3への変換が完了しました！', files: [file] });
+            await interaction.followUp({ content: '✅ MP3への変換が完了しました！', files: [file] });
 
         } catch (error) {
             console.error(error);
-            await interaction.followup({ content: '❌ 変換中にエラーが発生しました。' });
+            await interaction.followUp({ content: '❌ 変換中にエラーが発生しました。' });
         } finally {
             if (fs.existsSync(inputPath)) fs.unlinkSync(inputPath);
             if (fs.existsSync(outputPath)) fs.unlinkSync(outputPath);
