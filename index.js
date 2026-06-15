@@ -79,11 +79,19 @@ client.on('interactionCreate', async (interaction) => {
                     .save(outputPath);
             });
 
-            // 完了後の送信（音楽プレイヤー化を防ぎ、ダウンロードボタンを強制出現させる設定付き）
-            const file = new AttachmentBuilder(outputPath)
-                .setContentType('application/octet-stream'); // プレイヤー化を阻止する設定
+            // 【フリーズ対策を施した正しい送信方法】
+            // ファイルパスの代わりに、中身をバイナリデータ（Buffer）として読み込み、
+            // ファイル名と一緒に直接送信データに組み込むことでプレイヤー化（自動再生）を確実に防ぎます。
+            const fileBuffer = fs.readFileSync(outputPath);
+            const fileName = `${path.parse(attachment.name).name}.mp3`;
 
-            await interaction.followUp({ content: '✅ MP3への変換が完了しました！', files: [file] });
+            await interaction.followUp({ 
+                content: '✅ MP3への変換が完了しました！', 
+                files: [{
+                    attachment: fileBuffer,
+                    name: fileName
+                }] 
+            });
 
         } catch (error) {
             console.error('全体の処理エラー:', error);
