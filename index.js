@@ -1,4 +1,3 @@
-// 1行目に環境変数を強制設定（Render上で確実に動かすため）
 process.env.FFMPEG_PATH = require('ffmpeg-static');
 
 const { Client, GatewayIntentBits, ApplicationCommandType, ContextMenuCommandBuilder } = require('discord.js');
@@ -6,7 +5,31 @@ const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
 const ffmpeg = require('fluent-ffmpeg');
+const express = require('express'); // 外部ページ公開用の仕組み
 require('dotenv').config();
+
+// Webサーバーの初期化
+const app = express();
+const PORT = process.env.PORT || 3000;
+const PUBLIC_DIR = path.join(__dirname, 'public');
+
+// 配信用のフォルダがなければ自動作成
+if (!fs.existsSync(PUBLIC_DIR)) {
+    fs.mkdirSync(PUBLIC_DIR);
+}
+
+// フォルダ内のファイルをインターネット上に静的公開する設定
+app.use('/download', express.static(PUBLIC_DIR));
+
+// サーバーのトップページ（確認用）
+app.get('/', (req, res) => {
+    res.send('MP3 Converter Bot is Running Successfully!');
+});
+
+// サーバーを起動
+const server = app.listen(PORT, () => {
+    console.log(`Web server listening on port ${PORT}`);
+});
 
 const client = new Client({
     intents: [
@@ -45,12 +68,16 @@ client.on('interactionCreate', async (interaction) => {
             return interaction.reply({ content: '❌ 添付されているファイルは音声データではありません。', ephemeral: true });
         }
 
-        // 考え中（保留状態）を開始
         await interaction.deferReply();
 
-        // サーバーが停止しないよう一時保存先を /tmp フォルダ（Linuxの安全な場所）に変更
-        const inputPath = path.join('/tmp', attachment.name);
-        const outputPath = path.join('/tmp', `${path.parse(attachment.name).name}.mp3`);
+        // 外部に一時公開するためのランダムなIDと名前を生成
+        const fileId = Math.random().toString(36).substring(2, 15);
+        const inputPath = path.join('/tmp', `${fileId}_${attachment.name}`);
+        
+        const baseName = path.parse(attachment.name).name;
+        const mp3FileName = `${baseName}.mp3`;
+        // 公開用フォルダ配下に保存するパス
+        const outputPath = path.join(PUBLIC_DIR, `${fileId}_${mp3FileName}`);
 
         try {
             // ファイルのダウンロード処理
@@ -66,7 +93,7 @@ client.on('interactionCreate', async (interaction) => {
             // 音声のMP3変換処理
             await new Promise((resolve, reject) => {
                 ffmpeg(inputPath)
-                    .setFfmpegPath(process.env.FFMPEG_PATH) // 明示的にパスを指定
+                    .setFfmpegPath(process.env.FFMPEG_PATH)
                     .toFormat('mp3')
                     .on('end', () => {
                         console.log('FFmpegの変換が成功しました');
@@ -79,34 +106,36 @@ client.on('interactionCreate', async (interaction) => {
                     .save(outputPath);
             });
 
-            // 【超強力・プレイヤー化を100%阻止する設定】
-            // 末尾を「.mp3.bin」という名前に偽装して送信します。
-            const fileBuffer = fs.readFileSync(outputPath);
-            const fileName = `${path.parse(attachment.name).name}.mp3.bin`;
+            // Renderサーバー自身のWebサイトのURLを取得（末尾のスラッシュを削除）
+            // ※Renderの環境変数から自動取得できない場合は手動で書き換えも可能です
+            let serverUrl = interaction.client.user.id; // フォールバック
+            
+            // 外部からアクセスできるURLを組み立てる
+            // Renderでは自動的にWebサービスにURLが割り当てられます
+            const renderHost = process.env.RENDER_EXTERNAL_URL || `https://${process.env.RENDER_SERVICE_NAME}.onrender.com`;
+            const downloadUrl = `${renderHost}/download/${fileId}_${encodeURIComponent(mp3FileName)}`;
 
             await interaction.followUp({ 
-                content: '✅ MP3への変換が完了しました！ダウンロード後、ファイル名の末尾の「.bin」を消すと通常のMP3として使用できます。', 
-                files: [{
-                    attachment: fileBuffer,
-                    name: fileName
-                }] 
+                content: `✅ MP3への変換が完了しました！\n以下の外部ページURLをタップすると、ブラウザ（Safari/Chrome）から直接確実にダウンロードできます。\n\n🌐 **ダウンロード用リンク:**\n${downloadUrl}\n\n*※セキュリティのため、このリンクは15分後に自動で消去されます。*`
             });
+
+            // 15分後（900,000ミリ秒）にサーバー内からファイルを自動消去する安全タイマー
+            setTimeout(() => {
+                if (fs.existsSync(outputPath)) {
+                    fs.unlinkSync(outputPath);
+                    console.log(`一時ファイルを自動消去しました: ${mp3FileName}`);
+                }
+            }, 900000);
 
         } catch (error) {
             console.error('全体の処理エラー:', error);
             await interaction.followUp({ content: `❌ 変換中にエラーが発生して停止しました。\n理由: ${error.message || error}` });
-        } finally {
-            // ファイルの片付け
-            if (fs.existsSync(inputPath)) fs.unlinkSync(inputPath);
+            // エラー時もゴミファイルを掃除
             if (fs.existsSync(outputPath)) fs.unlinkSync(outputPath);
+        } finally {
+            if (fs.existsSync(inputPath)) fs.unlinkSync(inputPath);
         }
     }
 });
-
-const http = require('http');
-http.createServer((req, res) => {
-    res.writeHead(200, { 'Content-Type': 'text/plain' });
-    res.end('Bot is running!\n');
-}).listen(process.env.PORT || 3000);
 
 client.login(process.env.DISCORD_TOKEN);
